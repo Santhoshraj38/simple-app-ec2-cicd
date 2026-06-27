@@ -14,13 +14,19 @@ data "aws_ami" "ubuntu" {
   }
 }
 
+# Create Key Pair from generated public key file
+resource "aws_key_pair" "deployer" {
+  key_name   = var.key_name
+  public_key = file("${path.module}/deployer-key.pub")
+}
+
 # EC2 Instance
 resource "aws_instance" "web_server" {
   ami                  = data.aws_ami.ubuntu.id
   instance_type        = var.instance_type
   subnet_id            = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.web_sg.id]
-  key_name             = var.key_name
+  key_name             = aws_key_pair.deployer.key_name
 
   # Attach IAM Instance Profile
   iam_instance_profile = aws_iam_instance_profile.ec2_profile.name

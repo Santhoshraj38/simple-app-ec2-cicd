@@ -13,3 +13,7 @@ terraform/.terraform.lock.hcl
 # OS Files
 .DS_Store
 Thumbs.db
+
+# SSH Keys
+terraform/deployer-key
+terraform/deployer-key.pub
