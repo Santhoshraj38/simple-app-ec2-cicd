@@ -1,128 +1,123 @@
-# Cloud Infrastructure & Application Deployment
+# Cloud Infrastructure and Application Deployment
 
-This repository contains a complete solution for provisioning AWS infrastructure using **Terraform** and deploying a simple **Node.js Express application** on an EC2 instance via a **GitHub Actions CI/CD pipeline**.
+This repository contains the source code and infrastructure configuration to deploy a Node.js Express application on AWS. The infrastructure is provisioned using Terraform, and the deployment is automated through a GitHub Actions CI/CD pipeline.
 
 ---
 
-## 🏗️ Architecture Diagram
+## Architecture Diagram
 
-The diagram below shows the end-to-end user request flow and deployment architecture:
+The diagram below outlines the system architecture and deployment flow:
 
 ```mermaid
 graph TD
-    subgraph GitHub ["GitHub Platform"]
+    subgraph GitHub ["GitHub"]
         Actions[GitHub Actions Runner]
         Repo[Git Repository]
     end
 
-    subgraph AWS ["Amazon Web Services (AWS)"]
+    subgraph AWS ["Amazon Web Services"]
         subgraph VPC ["VPC (10.0.0.0/16)"]
             subgraph Subnet ["Public Subnet (10.0.1.0/24)"]
-                EC2[EC2 VM Instance: t2.micro]
-                SG[Security Group: HTTP/SSH]
+                EC2[EC2 Instance: t3.micro]
+                SG[Security Group]
             end
             IGW[Internet Gateway]
         end
         
-        IAM[IAM Role & Policy]
+        IAM[IAM Role]
     end
 
-    User[End User] -->|HTTP: Port 80| IGW
-    IGW -->|Reverse Proxy| EC2
+    User[User] -->|HTTP: Port 80| IGW
+    IGW -->|Nginx Proxy| EC2
     EC2 <--> IAM
     
     Actions -->|SSH / SCP| EC2
     Repo -->|Trigger CI/CD| Actions
 ```
 
-### Request Flow
-1. **User Request:** The client sends an HTTP request to the EC2 Public IP on Port 80.
-2. **Security Group:** The Security Group filters traffic, only allowing TCP traffic on ports 80 (HTTP), 3000 (direct App), and 22 (SSH).
-3. **Nginx Reverse Proxy:** Nginx acts as a reverse proxy on the EC2 instance, listening on Port 80 and routing internal requests to the Node.js application running on Port 3000.
-4. **App Execution:** The Node.js Express application runs in the background managed by **PM2** under the `ubuntu` user context.
+### Request and Deployment Flow
+1. **User Access:** Users access the application via HTTP on port 80. Traffic passes through the Internet Gateway to the EC2 instance.
+2. **Reverse Proxy:** Nginx acts as a reverse proxy on the EC2 instance, forwarding requests from port 80 to the Node.js application running on port 3000.
+3. **Application Layer:** The Node.js application is kept running in the background using PM2 under the standard user account.
+4. **CI/CD Pipeline:** Developers push code to the repository. GitHub Actions runs automated tests and deploys the latest version to the EC2 instance over SSH and SCP.
 
 ---
 
-## 🛠️ Tech Stack & Setup
+## Tech Stack and Local Setup
 
-### Components
-1. **Application:** Node.js Express server running on port 3000 (with testing via Jest + Supertest).
-2. **Infrastructure:** Terraform code targeting AWS.
-3. **CI/CD:** GitHub Actions for automated linting, unit testing, and deployment.
+### Core Components
+* **Application:** Node.js, Express, Jest, Supertest
+* **Infrastructure:** Terraform, AWS
+* **CI/CD:** GitHub Actions
 
-### Local Setup & Testing
-To run the application locally:
+### Running Locally
+To run the Node.js application locally:
 ```bash
 cd app
 npm install
-npm test      # Runs tests
-npm start     # Runs app on http://localhost:3000
+npm test      # Runs unit tests
+npm start     # Runs the local development server at http://localhost:3000
 ```
 
 ---
 
-## ⚙️ Deployment Instructions
+## Deployment Instructions
 
-### 1. Provisioning Infrastructure (Terraform)
-Navigate to the `terraform/` directory and run:
+### 1. Provisioning AWS Resources
+Navigate to the terraform directory to initialize and deploy:
 ```bash
 cd terraform
 terraform init
 terraform plan
 terraform apply
 ```
-*Note: Make sure to configure your AWS CLI credentials locally (`aws configure`) before running Terraform.*
+*Note: Make sure your AWS credentials are set up locally before running Terraform.*
 
-### 2. Configuring CI/CD Secrets in GitHub
-To enable the GitHub Actions deployment pipeline, add the following secrets under **Settings > Secrets and variables > Actions** in your Git repository:
+### 2. GitHub Actions Secrets Configuration
+To enable automatic deployments, configure the following secrets under **Settings > Secrets and variables > Actions** in your GitHub repository:
 
-| Secret Name | Description |
-| :--- | :--- |
-| `EC2_HOST` | The public IP of the EC2 instance (outputted by Terraform as `instance_public_ip`). |
-| `EC2_SSH_KEY` | The private SSH key used to access the EC2 instance (corresponding to `var.key_name`). |
-| `AWS_ACCESS_KEY_ID` | Your AWS IAM User access key ID. |
-| `AWS_SECRET_ACCESS_KEY` | Your AWS IAM User secret access key. |
+* **`EC2_HOST`**: The public IP address of the EC2 instance (provided as a Terraform output).
+* **`EC2_SSH_KEY`**: The private key matching the key pair deployed on the instance.
 
-Once these secrets are set, any push to the `main` branch will automatically run tests and deploy the updated application code to the EC2 instance.
+Any push to the `main` branch will run the unit tests and automatically update the code on the EC2 instance.
 
 ---
 
-## 💡 Design Decisions
+## Design Decisions
 
-1. **VPC Custom Setup:** Rather than using the default AWS VPC, we provision a custom VPC with a single public subnet. This provides isolated networking, custom IP ranges, and full control over route tables.
-2. **Nginx Reverse Proxy:** Instead of binding our Node.js app directly to Port 80 (which requires root/sudo access), we configure **Nginx** to listen on Port 80 and reverse-proxy requests to Node.js on Port 3000. This is standard production best practice, improving security and performance.
-3. **Process Management via PM2:** PM2 is utilized to keep the Node.js process alive. It handles automatic restarts if the app crashes, systemd startup configuration to survive VM reboots, and zero-downtime reloads (`pm2 reload`) during CI/CD.
-4. **IAM Role Attachment:** The EC2 instance is attached to an IAM Instance Profile granting access to the `AmazonSSMManagedInstanceCore` policy. This allows secure, passwordless console access via AWS Systems Manager Session Manager, removing the absolute requirement for open SSH ports.
-
----
-
-## ⚖️ Trade-offs Considered
-
-### Single VM vs. Container Orchestrator (ECS / EKS)
-* **Decision:** We deployed to a single EC2 instance rather than ECS Fargate or EKS.
-* **Trade-off:** While ECS/EKS provides auto-scaling, high availability, and built-in load balancing, a single EC2 instance is significantly cheaper ($0 under AWS Free Tier) and fits the requirement for a "simple application." For small workloads, the operational complexity and cost of ECS/EKS are not justified.
-
-### SSH Deployment vs. AWS CodeDeploy / Docker Registry
-* **Decision:** We used GitHub Actions to push code over SSH/SCP and reload PM2.
-* **Trade-off:** Building and pushing a Docker image to AWS ECR, then pulling it on the VM, is cleaner for containerization. However, it requires managing container registries and ECR auth tokens in GitHub, adding overhead. SCP/SSH deployment is simpler, faster to execute, and highly transparent for reviewers.
-
-### Public Subnet vs. NAT Gateway / Private Subnet
-* **Decision:** The EC2 instance is placed directly in a Public Subnet with a public IP.
-* **Trade-off:** In a enterprise production environment, VMs run in private subnets behind an Application Load Balancer (ALB), using NAT Gateways for outbound traffic. To stay within the Free Tier and avoid NAT Gateway charges (~$32+/month), we used a public subnet and secured the VM using strict Security Group rules.
+1. **Custom VPC Networking:** A custom VPC and subnet configuration was used instead of default VPC resources. This ensures control over IP assignment, route tables, and firewall rules.
+2. **Nginx Reverse Proxy:** Instead of running the Node.js application directly on port 80 (which requires root privileges), Nginx handles incoming port 80 traffic and forwards it to port 3000. This is more secure and aligns with production standards.
+3. **PM2 Process Management:** PM2 is configured to manage the Node.js process. It handles automatic restarts in case of application failures and configures system startup scripts to survive VM reboots.
+4. **IAM Instance Profile:** The EC2 instance is associated with an IAM role containing basic permissions. This includes the `AmazonSSMManagedInstanceCore` policy to enable secure management via Systems Manager (SSM) without relying on permanent credentials.
 
 ---
 
-## 💵 Cost Awareness
+## Trade-offs Considered
 
-The infrastructure is designed to fit entirely within the **AWS Free Tier** to ensure the deployment costs $0/month:
+### Single EC2 VM vs. Container Orchestration (ECS/EKS)
+* **Decision:** A single EC2 virtual machine was selected.
+* **Trade-off:** Container orchestrators like ECS or EKS provide better scalability and high availability, but they introduce higher complexity and pricing. For a basic application, a single EC2 instance is easier to deploy and cost-effective.
 
-* **EC2:** Uses a `t2.micro` (or `t3.micro` depending on region) which is free for 750 hours/month (12 months for new accounts).
-* **Storage:** 8 GB General Purpose SSD (gp3) volume is free under the 30 GB EBS Free Tier.
-* **Networking:** 1 public IPv4 address is assigned. *Note: AWS charges a small fee ($0.005/hour) for public IPv4 addresses, which totals ~$3.60/month if active 24/7, but remains free under the public IP allowance for new accounts in some regions.*
-* **Data Transfer:** 100 GB of egress data transfer per month is free.
+### SSH-Based Deployment vs. AWS CodeDeploy or Container Registry
+* **Decision:** Deployment is handled via GitHub Actions using SSH/SCP.
+* **Trade-off:** Deploying via Docker images pushed to ECR is clean and standard for large applications. However, setting up registries and authentication inside GitHub Actions adds complexity. Direct SSH deployment is simple, fast, and highly testable.
 
-### Clean-up Instructions
-To tear down the infrastructure and avoid any charges, run:
+### Public Subnet vs. Private Subnet with NAT Gateway
+* **Decision:** The EC2 instance is located in a public subnet.
+* **Trade-off:** A private subnet with a NAT Gateway and Application Load Balancer is more secure. However, a NAT Gateway costs ~$32/month. To keep the project free to run under the AWS Free Tier, a public subnet secured with tight security group rules was selected.
+
+---
+
+## Cost Awareness
+
+The resources used in this project are designed to stay within the **AWS Free Tier** limits ($0/month):
+
+* **Compute:** 1 x `t3.micro` EC2 instance (750 hours/month free for new accounts).
+* **Storage:** 8 GB General Purpose SSD (gp3) EBS volume (up to 30 GB free).
+* **Networking:** 1 public IPv4 address and up to 100 GB of free internet data egress per month.
+
+### Cleanup
+To destroy all provisioned infrastructure and avoid costs:
 ```bash
 cd terraform
 terraform destroy
