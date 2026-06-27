@@ -25,7 +25,7 @@ variable "subnet_cidr" {
 variable "instance_type" {
   type        = string
   description = "EC2 instance type"
-  default     = "t2.micro" # Free-tier eligible
+  default     = "t3.micro" # Free-tier eligible for newer accounts/regions
 }
 
 variable "key_name" {
